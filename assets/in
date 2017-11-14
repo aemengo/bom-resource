@@ -9,6 +9,7 @@ exec 1>&2 # redirect all output to stderr for logging
 source $(dirname $0)/common.sh
 
 destination=$1
+tmpdest=$(mktemp -d)
 
 if [ -z "$destination" ]; then
   echo "usage: $0 <path/to/destination>" >&2
@@ -21,6 +22,7 @@ PATH=/usr/local/bin:$PATH
 payload=$(mktemp $TMPDIR/git-resource-request.XXXXXX)
 
 cat > $payload <&0
+cat $payload > /tmp/payload
 
 load_pubkey $payload
 load_git_crypt_key $payload
@@ -31,14 +33,15 @@ configure_credentials $payload
 uri=$(jq -r '.source.uri // ""' < $payload)
 branch=$(jq -r '.source.branch // ""' < $payload)
 git_config_payload=$(jq -r '.source.git_config // []' < $payload)
-ref=$(jq -r '.version.ref // "HEAD"' < $payload)
-depth=$(jq -r '(.params.depth // 0)' < $payload)
-fetch=$(jq -r '(.params.fetch // [])[]' < $payload)
-submodules=$(jq -r '(.params.submodules // "all")' < $payload)
-commit_verification_key_ids=$(jq -r '(.source.commit_verification_key_ids // [])[]' < $payload)
-commit_verification_keys=$(jq -r '(.source.commit_verification_keys // [])[]' < $payload)
-gpg_keyserver=$(jq -r '.source.gpg_keyserver // "hkp://ipv4.pool.sks-keyservers.net/"' < $payload)
-disable_git_lfs=$(jq -r '(.params.disable_git_lfs // false)' < $payload)
+# depth=$(jq -r '(.params.depth // 0)' < $payload)
+# fetch=$(jq -r '(.params.fetch // [])[]' < $payload)
+# submodules=$(jq -r '(.params.submodules // "all")' < $payload)
+# commit_verification_key_ids=$(jq -r '(.source.commit_verification_key_ids // [])[]' < $payload)
+# commit_verification_keys=$(jq -r '(.source.commit_verification_keys // [])[]' < $payload)
+# gpg_keyserver=$(jq -r '.source.gpg_keyserver // "hkp://ipv4.pool.sks-keyservers.net/"' < $payload)
+# disable_git_lfs=$(jq -r '(.params.disable_git_lfs // false)' < $payload)
+product=$(jq -r '(.params.product // "")' < $payload)
+features=$(jq -r '(.params.fetch_features // false)' < $payload)
 
 configure_git_global "${git_config_payload}"
 
@@ -48,92 +51,61 @@ if [ -z "$uri" ]; then
   exit 1
 fi
 
+if [ -z "$product" ]; then
+  echo "invalid payload (missing product in parameters):" >&2
+  cat $payload >&2
+  exit 1
+fi
+
 branchflag=""
 if [ -n "$branch" ]; then
   branchflag="--branch $branch"
 fi
 
-depthflag=""
-if test "$depth" -gt 0 2> /dev/null; then
-  depthflag="--depth $depth"
-fi
+git clone --single-branch $uri $branchflag $tmpdest
 
-git clone --single-branch $depthflag $uri $branchflag $destination
-
-cd $destination
+cd $tmpdest
 
 git fetch origin refs/notes/*:refs/notes/*
-git checkout -q $ref
-
-invalid_key() {
-  echo "Invalid GPG key in: ${commit_verification_keys}"
-  exit 2
-}
-
-commit_not_signed() {
-  commit_id=$(git rev-parse ${ref})
-  echo "The commit ${commit_id} is not signed"
-  exit 1
-}
-
-if [ ! -z "${commit_verification_keys}" ] || [ ! -z "${commit_verification_key_ids}" ] ; then
-  if [ ! -z "${commit_verification_keys}" ]; then
-    echo "${commit_verification_keys}" | gpg --batch --import || invalid_key "${commit_verification_keys}"
-  fi
-  if [ ! -z "${commit_verification_key_ids}" ]; then
-    echo "${commit_verification_key_ids}" | \
-      xargs --no-run-if-empty -n1 gpg --batch --keyserver $gpg_keyserver --recv-keys
-  fi
-  git verify-commit $(git rev-list -n 1 $ref) || commit_not_signed
-fi
-
-if [ "$disable_git_lfs" != "true" ]; then
-  git lfs fetch
-  git lfs checkout
-fi
+git checkout -q HEAD
 
 git log -1 --oneline
 git clean --force --force -d
-git submodule sync
 
 if [ -f $GIT_CRYPT_KEY_PATH ]; then
   echo "unlocking git repo"
   git crypt unlock $GIT_CRYPT_KEY_PATH
 fi
 
-if [ "$submodules" == "all" ]; then
-  git submodule update --init  $depthflag --recursive
-elif [ "$submodules" != "none" ]; then
-  submodules=$(echo $submodules | jq -r '(.[])')
-  for submodule in $submodules; do
-    git submodule update --init $depthflag --recursive $submodule
-  done
-fi
+product_repo=$(grep -r "^git-repo: " bom/${product}.yml | awk '{print $(NF)}')
+product_commit=$(grep -r "^commit: " bom/${product}.yml | awk '{print $(NF)}')
 
-if [ "$disable_git_lfs" != "true" ]; then
-  git submodule foreach "git lfs fetch && git lfs checkout"
-fi
+echo "Checking out commit ${product_commit} of ${product_repo}"
 
-for branch in $fetch; do
-  git fetch origin $branch
-  git branch $branch FETCH_HEAD
-done
+git clone ${product_repo} ${destination}
 
-if [ "$ref" == "HEAD" ]; then
-  return_ref=$(git rev-parse HEAD)
-else
-  return_ref=$ref
-fi
+cd $destination
+git checkout -q ${product_commit}
 
 # Store committer email in .git/committer. Can be used to send email to last committer on failed build
 # Using https://github.com/mdomke/concourse-email-resource for example
 git --no-pager log -1 --pretty=format:"%ae" > .git/committer
 
-# Store git-resource returned version ref .git/ref. Useful to know concourse
-# pulled ref in following tasks and resources.
-echo "${return_ref}" > .git/ref
+cp $tmpdest/bom/${product}.yml .git/bom
+
+if [[ $features == true ]]; then
+  echo "Copying features file"
+
+  if [[ -r $tmpdest/features/${product}-vars.yml ]]; then
+    cp $tmpdest/features/${product}-vars.yml .git/features
+  else
+    echo "Features file does not exist" >&2
+  fi
+else
+  echo "Not copying features file"
+fi
 
 jq -n "{
-  version: {ref: $(echo $return_ref | jq -R .)},
+  version: {ref: $(echo $product_commit | jq -R .)},
   metadata: $(git_metadata)
 }" >&3
