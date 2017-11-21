@@ -72,6 +72,8 @@ git checkout -q HEAD
 git log -1 --oneline
 git clean --force --force -d
 
+resource_version_ref=$(git rev-parse HEAD)
+
 if [ -f $GIT_CRYPT_KEY_PATH ]; then
   echo "unlocking git repo"
   git crypt unlock $GIT_CRYPT_KEY_PATH
@@ -106,6 +108,6 @@ else
 fi
 
 jq -n "{
-  version: {ref: $(echo $product_commit | jq -R .)},
+  version: {ref: $(echo $resource_version_ref | jq -R .)},
   metadata: $(git_metadata)
 }" >&3
