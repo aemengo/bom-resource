@@ -44,6 +44,10 @@ if [ -z "$uri" ]; then
   exit 1
 fi
 
+shopt -s dotglob
+rm -fr ${destination}/*
+shopt -u dotglob
+
 if [ -z "$product" ]; then
   echo "WARNING: No product specified. No clone will occur." > ${destination}/WARNING
   cat ${destination}/WARNING >&2
