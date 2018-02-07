@@ -1,7 +1,6 @@
-# Git Resource
+# BOM Resource
 
-Tracks the commits in a [git](http://git-scm.com/) repository.
-
+Checks out a specific commit from a git `product` repository and optionally adds features file into `source` folder
 
 ## Source Configuration
 
@@ -88,6 +87,13 @@ Tracks the commits in a [git](http://git-scm.com/) repository.
     * `proxy_user`: *Optional.* If the proxy requires authentication, use this username
     * `proxy_password`: *Optional.* If the proxy requires authenticat, use this password
 
+* `features`: *Optional.* Allows configuration of how feature files will be compiled.  Works with `fetch_features` on the get of a resource.
+  Has the following sub-properties:
+  * `validate_keys`: *Optional.* Whether keys should be validated based on expected_keys file in product repo, default: `true`
+  * `expected_keys_file`: *Optional.* Specifies name of expected keys yaml file.  default: `expectedKeys.yml`
+  * `directory`: *Optional.* Directory within product repo that contains feature files.  default: `features`
+  * `search_path`: *Optional.* Array of features files in `directory` that will be added to search path
+
 ### Example
 
 Resource configuration for a private repo with an HTTPS proxy:
@@ -115,21 +121,20 @@ resources:
       proxy_port: 3128
       proxy_user: myuser
       proxy_password: myverysecurepassword
+    features:
+      validate_keys: false
+      directory: features
+      expected_keys_file: foo.yml
+      search_path: ["global.yml", "us.yml", "production.yml"]
 ```
 
-Fetching a repo with only 100 commits of history:
+Cloning cf product with a cf-vars.yml feature file:
 
 ``` yaml
 - get: source-code
-  params: {depth: 100}
-```
-
-Pushing local commits to the repo:
-
-``` yaml
-- get: some-other-repo
-- put: source-code
-  params: {repository: some-other-repo}
+  params:
+    product: cf
+    fetch_features: true
 ```
 
 ## Behavior
@@ -143,7 +148,7 @@ for `HEAD` is returned.
 Any commits that contain the string `[ci skip]` will be ignored. This
 allows you to commit to your repository without triggering a new version.
 
-### `in`: Clone the repository, at the given ref.
+### `in`: Clone the repository, at the given ref and if product name is specified will clone that product in it's place.
 
 Clones the repository to the destination, and locks it down to a given ref.
 It will return the same given ref as version.
@@ -166,6 +171,10 @@ Submodules are initialized and updated recursively.
 
 * `disable_git_lfs`: *Optional.* If `true`, will not fetch Git LFS files.
 
+* `product`: *Optional.* If set, will clone product repository based on configuration of product bom file.
+
+* `fetch_features`: *Optional.* If `true`, will populate the `.git/features` file.
+
 #### GPG signature verification
 
 If `commit_verification_keys` or `commit_verification_key_ids` is specified in
@@ -184,43 +193,62 @@ the case.
  * `.git/ref`: Version reference detected and checked out. It will usually contain
    the commit SHA-1 ref, but also the detected tag name when using `tag_filter`.
 
-### `out`: Push to a repository.
+ * `.git/bom`: the source of the bom used when cloning the product repo.
 
-Push the checked-out reference to the source's URI and branch. All tags are
-also pushed to the source. If a fast-forward for the branch is not possible
-and the `rebase` parameter is not provided, the push will fail.
+ * `.git/features`: Provided if `fetch_features` param is set to true.
 
-#### Parameters
+## BOM Specifics
 
-* `repository`: *Required.* The path of the repository to push to the source.
+### Repository configuration
+To enable the bom resource to use a single concourse resource that can clone different git repositories need to configure a repository with the following format.
 
-* `rebase`: *Optional.* If pushing fails with non-fast-forward, continuously
-  attempt rebasing and pushing.
+```
+├── bom
+│   └── test.yml
+├── features
+│   └── test-vars.yml
+```
 
-* `merge`: *Optional.* If pushing fails with non-fast-forward, continuously
-  attempt to merge remote to local before pushing. Only one of `merge` or
-  `rebase` can be provided, but not both.
+Where test represents a `product` that can be specified as a params on the `get` of the resource.
 
-* `tag`: *Optional.* If this is set then HEAD will be tagged. The value should be
-  a path to a file containing the name of the tag.
+### BOM file format
+The bom file needs to have at mininum 2 properties
 
-* `only_tag`: *Optional.* When set to 'true' push only the tags of a repo.
+* `git-repo`: Uri to the git repo for this given product.  Support both https and ssh format uri.
+* `commit`: Represent the commit to checkout in the `git-repo` specified.  
 
-* `tag_prefix`: *Optional.* If specified, the tag read from the file will be
-prepended with this string. This is useful for adding `v` in front of
-version numbers.
+#### Example
 
-* `force`: *Optional.* When set to 'true' this will force the branch to be
-pushed regardless of the upstream state.
+``` yaml
+commit: eb90453b0ca5768fa6
+git-repo: https://github.com/pivotalservices/bom-resource.git
+```
 
-* `annotate`: *Optional.* If specified the tag will be an
-  [annotated](https://git-scm.com/book/en/v2/Git-Basics-Tagging#Annotated-Tags)
-  tag rather than a
-  [lightweight](https://git-scm.com/book/en/v2/Git-Basics-Tagging#Lightweight-Tags)
-  tag. The value should be a path to a file containing the annotation message.
+### Feature File
+Feature files are supported as a simple flat structure of key/values in a yaml file
 
-* `notes`: *Optional.* If this is set then notes will be added to HEAD to the
-  `refs/notes/commits` ref. The value should be a path to a file containing the notes.
+#### Example
+``` yaml
+foo: bar
+hello: world
+```
+
+#### Search order
+Feature files will be searched for and applied in the following order.  This uses a last-in wins key model.
+- Within the bom repository `features/global-vars.yml`
+- Within the product repository files specified in the `search_path` property in the `directory` folder based on configuration of the `features` within `source` configuration of the resource
+- Within the bom repository `features/<product>-vars.yml`
+
+This allows to setup property inheritance model for feature values that can be used within your concourse tasks.
+
+#### Expected Keys
+To have keys validated need to include a yaml file in the "product repository" with the following format.
+
+``` yaml
+keys:
+- foo
+- hello
+```
 
 ## Development
 

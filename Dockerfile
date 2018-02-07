@@ -7,6 +7,17 @@ RUN git clone https://github.com/proxytunnel/proxytunnel.git
 WORKDIR /root/proxytunnel
 RUN make
 
+FROM golang:1.9-alpine AS gobuilder
+ADD / /go/src/github.com/pivotalservices/bom-resource
+
+WORKDIR /go/src/github.com/pivotalservices/bom-resource
+RUN apk --no-cache add git
+RUN go get -u github.com/golang/dep/cmd/dep
+RUN go get -u github.com/onsi/ginkgo/ginkgo
+RUN dep ensure
+RUN ginkgo features
+RUN go build -o /root/feature-file cmd/feature-file/main.go
+
 FROM alpine:edge AS resource
 
 RUN apk --no-cache add \
@@ -24,8 +35,10 @@ RUN apk --no-cache add \
   libstdc++
 
 COPY --from=tunnelbuilder /root/proxytunnel/proxytunnel proxytunnel
+COPY --from=gobuilder /root/feature-file feature-file
 
 RUN /usr/bin/install -c proxytunnel /usr/bin/proxytunnel
+RUN /usr/bin/install -c feature-file /usr/bin/feature-file
 
 RUN git config --global user.email "git@localhost"
 RUN git config --global user.name "git"

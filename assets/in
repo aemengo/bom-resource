@@ -9,7 +9,6 @@ exec 1>&2 # redirect all output to stderr for logging
 source $(dirname $0)/common.sh
 
 destination=$1
-tmpdest=$(mktemp -d)
 
 if [ -z "$destination" ]; then
   echo "usage: $0 <path/to/destination>" >&2
@@ -35,6 +34,18 @@ branch=$(jq -r '.source.branch // ""' < $payload)
 git_config_payload=$(jq -r '.source.git_config // []' < $payload)
 product=$(jq -r '(.params.product // "")' < $payload)
 features=$(jq -r '(.params.fetch_features // false)' < $payload)
+feature_config_payload=$(jq -r '.source.features // ""' < $payload)
+if [ ! -z "$feature_config_payload" ]; then
+  validateKeys=$(echo ${feature_config_payload} | jq -r '(.validate_keys // true)')
+  featuresDirectory=$(echo ${feature_config_payload} | jq -r '(.directory // "features")')
+  expected_keys_file=$(echo ${feature_config_payload} | jq -r '(.expected_keys_file // "expectedKeys.yml")')
+  searchPath=$(echo ${feature_config_payload} | jq -r '(.search_path // "[]")')
+else
+  validateKeys=false
+  featuresDirectory="features"
+  expected_keys_file="expectedKeys.yml"
+  searchPath="[]"
+fi
 
 configure_git_global "${git_config_payload}"
 
@@ -48,15 +59,15 @@ shopt -s dotglob
 rm -fr ${destination}/*
 shopt -u dotglob
 
-if [ -z "$product" ]; then
-  echo "WARNING: No product specified. No clone will occur." > ${destination}/WARNING
-  cat ${destination}/WARNING >&2
-  exit 0
-fi
-
 branchflag=""
 if [ -n "$branch" ]; then
   branchflag="--branch $branch"
+fi
+
+if [ -z "$product" ]; then
+  tmpdest=${destination}
+else
+  tmpdest=$(mktemp -d)
 fi
 
 git clone --single-branch $uri $branchflag $tmpdest
@@ -76,33 +87,48 @@ if [ -f $GIT_CRYPT_KEY_PATH ]; then
   git crypt unlock $GIT_CRYPT_KEY_PATH
 fi
 
-product_repo=$(grep -r "^git-repo: " bom/${product}.yml | awk '{print $(NF)}')
-product_commit=$(grep -r "^commit: " bom/${product}.yml | awk '{print $(NF)}')
+if [ -z "$product" ]; then
+  echo "WARNING: No product specified. No product clone will occur."
+else
+  product_repo=$(grep -r "^git-repo: " bom/${product}.yml | awk '{print $(NF)}')
+  product_commit=$(grep -r "^commit: " bom/${product}.yml | awk '{print $(NF)}')
 
-echo "Checking out commit ${product_commit} of ${product_repo}"
+  echo "Checking out commit ${product_commit} of ${product_repo}"
 
-git clone ${product_repo} ${destination}
+  git clone ${product_repo} ${destination}
 
-cd $destination
-git checkout -q ${product_commit}
+  cd $destination
+  git checkout -q ${product_commit}
+
+  cp $tmpdest/bom/${product}.yml .git/bom
+
+  if [[ $features == true ]]; then
+    echo "Copying features file"
+    inputFile=$(mktemp)
+    echo $searchPath | jq -c -r '.[]' | while read i; do
+        echo "${tmpInput} --input-file ${featuresDirectory}/${i}" >> $inputFile
+    done
+    validate=""
+    if [[ $validateKeys == true ]]; then
+        validate="--validate-keys"
+    fi
+    echo "executing feature-file compile --input-file $tmpdest/features/global-vars.yml \
+       $(cat ${inputFile}) --input-file $tmpdest/features/${product}-vars.yml \
+       --output-file .git/features \
+       ${validate} --expected-keys-file ${featuresDirectory}/${expected_keys_file}"
+
+    feature-file compile --input-file $tmpdest/features/global-vars.yml \
+       $(cat ${inputFile}) --input-file $tmpdest/features/${product}-vars.yml \
+       --output-file .git/features \
+       ${validate} --expected-keys-file ${featuresDirectory}/${expected_keys_file}
+  else
+    echo "Not copying features file"
+  fi
+fi
 
 # Store committer email in .git/committer. Can be used to send email to last committer on failed build
 # Using https://github.com/mdomke/concourse-email-resource for example
 git --no-pager log -1 --pretty=format:"%ae" > .git/committer
-
-cp $tmpdest/bom/${product}.yml .git/bom
-
-if [[ $features == true ]]; then
-  echo "Copying features file"
-
-  if [[ -r $tmpdest/features/${product}-vars.yml ]]; then
-    cp $tmpdest/features/${product}-vars.yml .git/features
-  else
-    echo "Features file does not exist" >&2
-  fi
-else
-  echo "Not copying features file"
-fi
 
 jq -n "{
   version: {ref: $(echo $resource_version_ref | jq -R .)},
