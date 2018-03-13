@@ -65,7 +65,6 @@ Checks out a specific commit from a git `product` repository and optionally adds
     * `proxy_user`: *Optional.* If the proxy requires authentication, use this username
     * `proxy_password`: *Optional.* If the proxy requires authenticat, use this password
 
-* ``
 * `features`: *Optional.* Allows configuration of how feature files will be compiled.
   Has the following sub-properties:
   * `validate_keys`: *Optional.* Whether keys should be validated based on expected_keys file in product repo, default: `false`
