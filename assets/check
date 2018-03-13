@@ -22,6 +22,7 @@ configure_credentials $payload
 
 uri=$(jq -r '.source.uri // ""' < $payload)
 branch=$(jq -r '.source.branch // ""' < $payload)
+bom_root_directory=$(jq -r '(.source.bom_root_directory // ".")' < $payload)
 git_config_payload=$(jq -r '.source.git_config // []' < $payload)
 
 configure_git_global "${git_config_payload}"
@@ -53,8 +54,15 @@ else
   log_range="-1"
 fi
 
+if [ "$bom_root_directory" = "." ]; then
+  paths_search=""
+else
+  paths_search="-- $bom_root_directory"
+fi
+
 {
   set -f
   git log --format='%H' --first-parent $log_range
+  git log --format='%H' --first-parent $log_range $paths_search
   set +f
 } | jq -R '.' | jq -s "map({ref: .})" >&3

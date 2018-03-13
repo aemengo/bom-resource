@@ -32,11 +32,10 @@ configure_credentials $payload
 uri=$(jq -r '.source.uri // ""' < $payload)
 branch=$(jq -r '.source.branch // ""' < $payload)
 git_config_payload=$(jq -r '.source.git_config // []' < $payload)
-product=$(jq -r '(.params.product // "")' < $payload)
-features=$(jq -r '(.params.fetch_features // false)' < $payload)
+bom_root_directory=$(jq -r '(.source.bom_root_directory // ".")' < $payload)
 feature_config_payload=$(jq -r '.source.features // ""' < $payload)
 if [ ! -z "$feature_config_payload" ]; then
-  validateKeys=$(echo ${feature_config_payload} | jq -r '(.validate_keys // true)')
+  validateKeys=$(echo ${feature_config_payload} | jq -r '(.validate_keys // false)')
   featuresDirectory=$(echo ${feature_config_payload} | jq -r '(.directory // "features")')
   expected_keys_file=$(echo ${feature_config_payload} | jq -r '(.expected_keys_file // "expectedKeys.yml")')
   searchPath=$(echo ${feature_config_payload} | jq -r '(.search_path // "[]")')
@@ -46,6 +45,7 @@ else
   expected_keys_file="expectedKeys.yml"
   searchPath="[]"
 fi
+product=$(jq -r '(.params.product // "")' < $payload)
 
 configure_git_global "${git_config_payload}"
 
@@ -90,8 +90,8 @@ fi
 if [ -z "$product" ]; then
   echo "WARNING: No product specified. No product clone will occur."
 else
-  product_repo=$(grep -r "^git-repo: " bom/${product}.yml | awk '{print $(NF)}')
-  product_commit=$(grep -r "^commit: " bom/${product}.yml | awk '{print $(NF)}')
+  product_repo=$(grep -r "^git-repo: " ${bom_root_directory}/bom/${product}.yml | awk '{print $(NF)}')
+  product_commit=$(grep -r "^commit: " ${bom_root_directory}/bom/${product}.yml | awk '{print $(NF)}')
 
   echo "Checking out commit ${product_commit} of ${product_repo}"
 
@@ -100,30 +100,25 @@ else
   cd $destination
   git checkout -q ${product_commit}
 
-  cp $tmpdest/bom/${product}.yml .git/bom
-
-  if [[ $features == true ]]; then
-    echo "Copying features file"
-    inputFile=$(mktemp)
-    echo $searchPath | jq -c -r '.[]' | while read i; do
-        echo "${tmpInput} --input-file ${featuresDirectory}/${i}" >> $inputFile
-    done
-    validate=""
-    if [[ $validateKeys == true ]]; then
-        validate="--validate-keys"
-    fi
-    echo "executing feature-file compile --input-file $tmpdest/features/global-vars.yml \
-       $(cat ${inputFile}) --input-file $tmpdest/features/${product}-vars.yml \
-       --output-file .git/features \
-       ${validate} --expected-keys-file ${featuresDirectory}/${expected_keys_file}"
-
-    feature-file compile --input-file $tmpdest/features/global-vars.yml \
-       $(cat ${inputFile}) --input-file $tmpdest/features/${product}-vars.yml \
-       --output-file .git/features \
-       ${validate} --expected-keys-file ${featuresDirectory}/${expected_keys_file}
-  else
-    echo "Not copying features file"
+  cp $tmpdest/${bom_root_directory}/bom/${product}.yml .git/bom
+  echo "Copying features file"
+  inputFile=$(mktemp)
+  echo $searchPath | jq -c -r '.[]' | while read i; do
+      echo "${tmpInput} --input-file ${featuresDirectory}/${i}" >> $inputFile
+  done
+  validate=""
+  if [[ $validateKeys == true ]]; then
+      validate="--validate-keys --expected-keys-file ${featuresDirectory}/${expected_keys_file}"
   fi
+  feature-file compile $(cat ${inputFile}) \
+     --input-file $tmpdest/${bom_root_directory}/features/global-vars.yml \
+     --input-file $tmpdest/${bom_root_directory}/features/${product}-vars.yml \
+     --output-file .git/features \
+     ${validate} --expected-keys-file ${featuresDirectory}/${expected_keys_file}
+
+  echo "*******"
+  cat .git/features
+  echo "*******"
 fi
 
 # Store committer email in .git/committer. Can be used to send email to last committer on failed build

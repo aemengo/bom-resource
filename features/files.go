@@ -13,11 +13,14 @@ func Generate(validateKeys bool, filePaths []string, expectedKeys []string) (map
 	valueMap := make(map[string]interface{})
 	for _, filePath := range filePaths {
 		if _, err := os.Stat(filePath); err == nil {
+			fmt.Println(fmt.Sprintf("Processing %s", filePath))
 			data, err := ioutil.ReadFile(filePath)
 			if err != nil {
 				return nil, err
 			}
 			yaml.Unmarshal(data, &valueMap)
+		} else {
+			fmt.Println(fmt.Sprintf("File %s, not found", filePath))
 		}
 	}
 	if validateKeys {

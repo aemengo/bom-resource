@@ -30,27 +30,8 @@ Checks out a specific commit from a git `product` repository and optionally adds
 
    Note: You can also use pipeline templating to hide this password in source control. (For more information: https://concourse.ci/fly-set-pipeline.html)
 
-* `paths`: *Optional.* If specified (as a list of glob patterns), only changes
-  to the specified files will yield new versions from `check`.
-
-* `ignore_paths`: *Optional.* The inverse of `paths`; changes to the specified
-  files are ignored.
-
-  Note that if you want to push commits that change these files via a `put`,
-  the commit will still be "detected", as [`check` and `put` both introduce
-  versions](https://concourse.ci/pipeline-mechanics.html#collecting-versions).
-  To avoid this you should define a second resource that you use for commits
-  that change files that you don't want to feed back into your pipeline - think
-  of one as read-only (with `ignore_paths`) and one as write-only (which
-  shouldn't need it).
-
 * `skip_ssl_verification`: *Optional.* Skips git ssl verification by exporting
   `GIT_SSL_NO_VERIFY=true`.
-
-* `tag_filter`: *Optional.* If specified, the resource will only detect commits
-  that have a tag matching the expression that have been made against
-  the `branch`. Patterns are [glob(7)](http://man7.org/linux/man-pages/man7/glob.7.html)
-  compatible (as in, bash compatible).
 
 * `git_config`: *Optional.* If specified as (list of pairs `name` and `value`)
   it will configure git global options, setting each name with each value.
@@ -59,9 +40,6 @@ Checks out a specific commit from a git `product` repository and optionally adds
 
   See the [`git-config(1)` manual page](https://www.kernel.org/pub/software/scm/git/docs/git-config.html)
   for more information and documentation of existing git options.
-
-* `disable_ci_skip`: *Optional.* Allows for commits that have been labeled with `[ci skip]` or `[skip ci]`
-   previously to be discovered by the resource.
 
 * `commit_verification_keys`: *Optional.* Array of GPG public keys that the
   resource will check against to verify the commit (details below).
@@ -87,9 +65,10 @@ Checks out a specific commit from a git `product` repository and optionally adds
     * `proxy_user`: *Optional.* If the proxy requires authentication, use this username
     * `proxy_password`: *Optional.* If the proxy requires authenticat, use this password
 
-* `features`: *Optional.* Allows configuration of how feature files will be compiled.  Works with `fetch_features` on the get of a resource.
+* ``
+* `features`: *Optional.* Allows configuration of how feature files will be compiled.
   Has the following sub-properties:
-  * `validate_keys`: *Optional.* Whether keys should be validated based on expected_keys file in product repo, default: `true`
+  * `validate_keys`: *Optional.* Whether keys should be validated based on expected_keys file in product repo, default: `false`
   * `expected_keys_file`: *Optional.* Specifies name of expected keys yaml file.  default: `expectedKeys.yml`
   * `directory`: *Optional.* Directory within product repo that contains feature files.  default: `features`
   * `search_path`: *Optional.* Array of features files in `directory` that will be added to search path
@@ -99,9 +78,16 @@ Checks out a specific commit from a git `product` repository and optionally adds
 Resource configuration for a private repo with an HTTPS proxy:
 
 ``` yaml
+resource_types:
+- name: bom
+  type: docker-image
+  source:
+    repository: pivotalservices/bom-resource
+    tag: latest
+
 resources:
 - name: source-code
-  type: git
+  type: bom
   source:
     uri: git@github.com:concourse/git-resource.git
     branch: master
@@ -134,7 +120,6 @@ Cloning cf product with a cf-vars.yml feature file:
 - get: source-code
   params:
     product: cf
-    fetch_features: true
 ```
 
 ## Behavior
@@ -144,9 +129,6 @@ Cloning cf product with a cf-vars.yml feature file:
 The repository is cloned (or pulled if already present), and any commits
 from the given version on are returned. If no version is given, the ref
 for `HEAD` is returned.
-
-Any commits that contain the string `[ci skip]` will be ignored. This
-allows you to commit to your repository without triggering a new version.
 
 ### `in`: Clone the repository, at the given ref and if product name is specified will clone that product in it's place.
 
@@ -173,8 +155,6 @@ Submodules are initialized and updated recursively.
 
 * `product`: *Optional.* If set, will clone product repository based on configuration of product bom file.
 
-* `fetch_features`: *Optional.* If `true`, will populate the `.git/features` file.
-
 #### GPG signature verification
 
 If `commit_verification_keys` or `commit_verification_key_ids` is specified in
@@ -195,7 +175,7 @@ the case.
 
  * `.git/bom`: the source of the bom used when cloning the product repo.
 
- * `.git/features`: Provided if `fetch_features` param is set to true.
+ * `.git/features`: compiled feature file with yaml content
 
 ## BOM Specifics
 
@@ -220,7 +200,7 @@ The bom file needs to have at mininum 2 properties
 #### Example
 
 ``` yaml
-commit: eb90453b0ca5768fa6
+commit: eb90453b0ca5768fa6....
 git-repo: https://github.com/pivotalservices/bom-resource.git
 ```
 
@@ -235,8 +215,8 @@ hello: world
 
 #### Search order
 Feature files will be searched for and applied in the following order.  This uses a last-in wins key model.
-- Within the bom repository `features/global-vars.yml`
 - Within the product repository files specified in the `search_path` property in the `directory` folder based on configuration of the `features` within `source` configuration of the resource
+- Within the bom repository `features/global-vars.yml`
 - Within the bom repository `features/<product>-vars.yml`
 
 This allows to setup property inheritance model for feature values that can be used within your concourse tasks.
