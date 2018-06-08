@@ -104,8 +104,8 @@ else
   echo "Copying features file"
   inputFile=$(mktemp)
   echo $searchPath | jq -c -r '.[]' | while read i; do
-      echo "Searching for ${featuresDirectory}/${i}"
-      echo "${tmpInput} --input-file ${featuresDirectory}/${i}" >> $inputFile
+      echo "Searching for ${PWD}/${featuresDirectory}/${i}"
+      echo "${tmpInput} --input-file ${PWD}/${featuresDirectory}/${i}" >> $inputFile
   done
   productFeatures=$(cat ${inputFile})
   echo "Inputs from search path ${productFeatures}"
