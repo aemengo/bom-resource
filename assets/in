@@ -104,13 +104,16 @@ else
   echo "Copying features file"
   inputFile=$(mktemp)
   echo $searchPath | jq -c -r '.[]' | while read i; do
+      echo "Searching for ${featuresDirectory}/${i}"
       echo "${tmpInput} --input-file ${featuresDirectory}/${i}" >> $inputFile
   done
+  productFeatures=$(cat ${inputFile})
+  echo "Inputs from search path ${productFeatures}"
   validate=""
   if [[ $validateKeys == true ]]; then
       validate="--validate-keys --expected-keys-file ${featuresDirectory}/${expected_keys_file}"
   fi
-  feature-file compile $(cat ${inputFile}) \
+  feature-file compile ${productFeatures} \
      --input-file $tmpdest/${bom_root_directory}/features/global-vars.yml \
      --input-file $tmpdest/${bom_root_directory}/features/${product}-vars.yml \
      --output-file .git/features \
