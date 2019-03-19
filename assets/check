@@ -62,7 +62,6 @@ fi
 
 {
   set -f
-  git log --format='%H' --first-parent $log_range
   git log --format='%H' --first-parent $log_range $paths_search
   set +f
 } | jq -R '.' | jq -s "map({ref: .})" >&3
