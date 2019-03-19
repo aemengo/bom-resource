@@ -24,7 +24,6 @@ cat > $payload <&0
 cat $payload > /tmp/payload
 
 load_pubkey $payload
-load_git_crypt_key $payload
 configure_https_tunnel $payload
 configure_git_ssl_verification $payload
 configure_credentials $payload
@@ -81,11 +80,6 @@ git log -1 --oneline
 git clean --force --force -d
 
 resource_version_ref=$(git rev-parse HEAD)
-
-if [ -f $GIT_CRYPT_KEY_PATH ]; then
-  echo "unlocking git repo"
-  git crypt unlock $GIT_CRYPT_KEY_PATH
-fi
 
 if [ -z "$product" ]; then
   echo "WARNING: No product specified. No product clone will occur."

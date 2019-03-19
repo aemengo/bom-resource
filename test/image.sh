@@ -1,5 +1,4 @@
 #!/bin/bash
-
 set -e
 
 . "$(dirname "$0")/helpers.sh"
